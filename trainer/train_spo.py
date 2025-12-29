@@ -192,7 +192,6 @@ def spo_train_epoch(epoch, loader, iters, ref_model, reward_model, reward_tokeni
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
-            torch.cuda.empty_cache()
 
         if step % args.log_interval == 0 or step == iters:
             policy_loss_val = loss.item()
@@ -223,15 +222,14 @@ def spo_train_epoch(epoch, loader, iters, ref_model, reward_model, reward_tokeni
             moe_suffix = '_moe' if lm_config.use_moe else ''
             ckp = f'{args.save_dir}/{args.save_weight}_{lm_config.hidden_size}{moe_suffix}.pth'
             state_dict = model.module.state_dict() if isinstance(model, DistributedDataParallel) else model.state_dict()
-            torch.save({k: v.half() for k, v in state_dict.items()}, ckp)
+            torch.save({k: v.half().cpu() for k, v in state_dict.items()}, ckp)
             lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, 
                          epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints', scheduler=scheduler)
             model.train()
+            del state_dict
 
         del prompt_inputs, outputs, completion_ids, per_token_logps, ref_per_token_logps
         del completions, rewards, advantages, completion_mask, baselines, response_masks
-        torch.cuda.empty_cache()
-        gc.collect()
 
 
 if __name__ == "__main__":
@@ -243,7 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-7, help="初始学习率")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu", help="训练设备")
     parser.add_argument("--dtype", type=str, default="bfloat16", help="混合精度类型")
-    parser.add_argument("--num_workers", type=int, default=1, help="数据加载线程数")
+    parser.add_argument("--num_workers", type=int, default=8, help="数据加载线程数")
     parser.add_argument("--accumulation_steps", type=int, default=4, help="梯度累积步数")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="梯度裁剪阈值")
     parser.add_argument("--log_interval", type=int, default=1, help="日志打印间隔")
